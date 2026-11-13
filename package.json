@@ -1,0 +1,1 @@
+{"name":"pep-chaco-cooperacion","private":true,"version":"2.0.0","scripts":{"test":"node tests/security.cjs && node tests/frontend.cjs"},"devDependencies":{"@electric-sql/pglite":"0.3.14","jsdom":"26.1.0"}}
