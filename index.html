@@ -48,6 +48,7 @@
 #loginError,#proposalError{color:#a42c43;margin:10px 0}#mfaEnrollment code{overflow-wrap:anywhere}#managementStatus{padding:8px 0}#editProposalDialog{max-width:900px;width:calc(100% - 30px)}
 @media(max-width:680px){.account-bar,.admin-heading{align-items:flex-start;flex-direction:column}.admin-grid{grid-template-columns:1fr}.admin-actions .button{font-size:12px}.review-card{padding:13px}.management{padding-top:16px}.header-actions{flex-wrap:wrap}}
 @media print{.account-bar,.management{display:none!important}}
+.proposal-section{border:1px solid var(--border);border-radius:10px;padding:16px;margin:14px 0}.proposal-section h3,.proposal-section summary{font-size:15px;font-weight:700;color:var(--navy);margin-bottom:14px}.choice-field{border:0;padding:0;margin:0;min-width:0}.choice-field legend{font-weight:650;font-size:12px;margin-bottom:7px}.choices{display:flex;flex-wrap:wrap;gap:8px}.choices label{display:flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:6px;padding:6px;font-size:12px}.choices input{width:16px;height:16px}.proposal-section details{min-width:0}
 </style>
 </head>
 <body>
@@ -69,7 +70,7 @@
 </section>
 <section id="management" class="wrap management" hidden aria-labelledby="managementTitle">
  <div class="admin-heading"><div><h2 id="managementTitle">Panel de gestión</h2><p id="roleHelp"></p></div><button class="button" id="closePanel">Volver al tablero</button></div>
- <div class="admin-actions"><button class="button primary" id="newProposal">Nueva propuesta</button><button class="button" data-admin-tab="queue">Revisión</button><button class="button admin-only" data-admin-tab="sources">Fuentes</button><button class="button admin-only" data-admin-tab="history">Historial</button><button class="button admin-only" data-admin-tab="users">Usuarios y roles</button><button class="button admin-only" id="rejectionsExport">Exportar rechazos</button><button class="button admin-only" id="weeklyImport">Importar CSV semanal</button></div>
+ <div class="admin-actions"><button class="button primary" id="newProposal">Agregar oportunidad</button><button class="button" data-admin-tab="queue">Revisión</button><button class="button admin-only" data-admin-tab="sources">Fuentes</button><button class="button admin-only" data-admin-tab="history">Historial</button><button class="button admin-only" data-admin-tab="users">Usuarios y roles</button><button class="button admin-only" id="rejectionsExport">Exportar rechazos</button><button class="button admin-only" id="weeklyImport">Importar CSV semanal</button></div>
  <p id="managementStatus" role="status" aria-live="polite"></p><div id="managementBody"></div>
 </section>
 <dialog id="loginDialog" aria-labelledby="loginTitle"><div class="dialog-header"><h2 id="loginTitle">Acceso de usuarios</h2><button class="dialog-close" data-close="loginDialog" aria-label="Cerrar">×</button></div><div class="dialog-content">
@@ -77,7 +78,7 @@
  <p class="helper">El administrador crea las cuentas. No hay registro público. La sesión se cierra después de 30 minutos de inactividad y al recargar o cerrar esta página.</p><p id="loginError" role="alert"></p>
  <section id="mfaSection" hidden><h3>Doble factor</h3><p id="mfaDescription"></p><div id="mfaEnrollment"></div><form id="mfaForm" class="admin-form"><label>Código de la aplicación autenticadora<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label><button class="button primary">Verificar código</button></form></section>
 </div></dialog>
-<dialog id="editProposalDialog" aria-labelledby="editProposalTitle"><div class="dialog-header"><h2 id="editProposalTitle">Propuesta</h2><button class="dialog-close" data-close="editProposalDialog" aria-label="Cerrar">×</button></div><div class="dialog-content"><form id="proposalForm"><div id="proposalFields" class="admin-grid"></div><p class="helper">Separá listas con punto y coma. Fechas y montos sin información se dejan vacíos: se mostrarán como “No informado”. El resumen admite hasta tres líneas.</p><label id="approveOnSaveLabel" hidden><input id="approveOnSave" type="checkbox"> Guardar los cambios y aprobar esta propuesta</label><p id="proposalError" role="alert"></p><button class="button primary" type="submit">Guardar</button></form></div></dialog>
+<dialog id="editProposalDialog" aria-labelledby="editProposalTitle"><div class="dialog-header"><h2 id="editProposalTitle">Propuesta</h2><button class="dialog-close" data-close="editProposalDialog" aria-label="Cerrar">×</button></div><div class="dialog-content"><form id="proposalForm"><p class="helper">Completá la ficha. Al guardar, queda pendiente de revisión y no se publica.</p><div id="proposalFields"></div><p class="helper">Marcá los destinatarios que correspondan. Fechas y montos sin información se dejan vacíos: se mostrarán como “No informado”. El resumen admite hasta tres líneas.</p><label id="approveOnSaveLabel" hidden><input id="approveOnSave" type="checkbox"> Guardar los cambios y aprobar esta propuesta</label><p id="proposalError" role="alert"></p><button id="saveProposalButton" class="button primary" type="submit">Guardar pendiente</button></form></div></dialog>
 <dialog id="importDialog" aria-labelledby="importTitle"><div class="dialog-header"><h2 id="importTitle">Revisar importación</h2><button class="dialog-close" data-close="importDialog" aria-label="Cerrar">×</button></div><div class="dialog-content"><p>La importación crea propuestas pendientes. Nunca publica ni reemplaza una oportunidad aprobada. Se procesan como máximo 25 filas, por puntaje y cercanía del cierre.</p><div id="importPreview"></div><label>Cambio sustancial respecto de rechazos anteriores (si corresponde)<textarea id="substantialChange" rows="3" placeholder="Explicá el cambio verificable. Sin justificación, los rechazos repetidos se omiten."></textarea></label><div class="admin-actions"><button class="button primary" id="confirmImport">Importar como pendientes</button><button class="button" id="exportOverflow" hidden>Exportar pendientes de siguiente corrida</button></div><pre id="importResult" aria-live="polite"></pre></div></dialog>
 
   <main class="wrap">
@@ -535,13 +536,27 @@
     if(!confirm(`${decision==='aprobada'?'Publicar':decision==='archivada'?'Archivar':'Rechazar'} ${rows.length} propuesta(s)?${decision==='aprobada'?' Confirmás que revisaste fuentes y elegibilidad.':''}`))return;
     await resultOf(db.rpc('revisar_lote',{items:rows.map(r=>({id:r.id,version:r.version})),decision,motivo}));await renderManagement();await loadRemote();
   }
-  function openProposal(row=null){editingRow=row;$('proposalError').textContent='';$('approveOnSave').checked=false;$('approveOnSaveLabel').hidden=!isAdmin()||!row||row.estado_revision!=='pendiente';
+  function openProposal(row=null){
+    editingRow=row;$('proposalError').textContent='';$('approveOnSave').checked=false;
+    $('approveOnSaveLabel').hidden=!isAdmin()||!row||row.estado_revision!=='pendiente';
+    text('editProposalTitle',row?'Editar oportunidad':'Agregar oportunidad');
+    text('saveProposalButton',row?'Guardar cambios':'Guardar pendiente');
+    const defaults={codigo:'MAN-'+todayISO().slice(0,4)+'-'+crypto.randomUUID().slice(0,8).toUpperCase(),origen:'Descubierta',puntaje_relevancia:1,confianza:'Bajo',eje_principal:'Sin eje / a revisar',fecha_relevamiento:todayISO(),area_canalizadora:profile.rol==='editor'?profile.area:''};
     const labels={...Object.fromEntries(HEADERS.map((h,i)=>[DB_FIELDS[i],h])),...Object.fromEntries(Object.entries(REVIEW_FIELDS).filter(([,k])=>!['posible_duplicado_de','estado_revision'].includes(k)).map(([h,k])=>[k,h]))};
-    $('proposalFields').innerHTML=Object.entries(labels).map(([k,label])=>{const value=row?.[k]??(k==='origen'?'Descubierta':k==='puntaje_relevancia'?1:k==='area_canalizadora'&&profile.rol==='editor'?profile.area:'');let control;
+    const field=k=>{const label=labels[k],value=row?.[k]??defaults[k]??'';let control;
+      if(ARRAY_FIELDS.includes(k)){
+        const options=k==='sector_destinatario'?['Gubernamental','No gubernamental']:k==='subsector'?SUBSECTORS.map(x=>x[0]):ENUMS.eje_principal.filter(x=>x!=='Sin eje / a revisar');
+        const selected=Array.isArray(value)?value:[];
+        return '<fieldset class="choice-field"><legend>'+esc(label)+'</legend><div class="choices">'+[...new Set([...options,...selected])].map(v=>'<label><input type="checkbox" name="'+k+'" value="'+esc(v)+'" '+(selected.includes(v)?'checked':'')+'> '+esc(v)+'</label>').join('')+'</div></fieldset>';
+      }
       if(ENUMS[k])control='<select name="'+k+'" required><option value="">Seleccionar…</option>'+ENUMS[k].map(v=>'<option '+(value===v?'selected':'')+'>'+esc(v)+'</option>').join('')+'</select>';
       else if(['resumen','requisitos_contrapartida','senales_alerta','motivo_relevancia'].includes(k))control='<textarea name="'+k+'" rows="3" '+(k==='resumen'?'maxlength="900"':'')+'>'+esc(value)+'</textarea>';
-      else control='<input name="'+k+'" type="'+(DATE_FIELDS.includes(k)?'date':['monto_min','monto_max','puntaje_relevancia'].includes(k)?'number':k==='link'?'url':'text')+'" '+(['monto_min','monto_max'].includes(k)?'min="0" step="any"':k==='puntaje_relevancia'?'min="1" max="5" step="1"':'')+' value="'+esc(Array.isArray(value)?value.join('; '):value)+'" '+(['codigo','nombre','organismo','area_canalizadora'].includes(k)?'required':'')+' '+(k==='area_canalizadora'&&profile.rol==='editor'?'readonly':'')+'>';
-      return '<label>'+esc(label)+control+'</label>';}).join('');$('editProposalDialog').showModal();
+      else control='<input name="'+k+'" type="'+(DATE_FIELDS.includes(k)?'date':['monto_min','monto_max','puntaje_relevancia'].includes(k)?'number':k==='link'?'url':'text')+'" '+(['monto_min','monto_max'].includes(k)?'min="0" step="any"':k==='puntaje_relevancia'?'min="1" max="5" step="1"':'')+' value="'+esc(value)+'" '+(['codigo','nombre','organismo','area_canalizadora'].includes(k)?'required':'')+' '+(k==='area_canalizadora'&&profile.rol==='editor'?'readonly':'')+'>';
+      return '<label>'+esc(label)+(['nombre','organismo','area_canalizadora','ambito','estado','tipo'].includes(k)?' *':'')+control+'</label>';
+    };
+    const group=(title,keys,closed=false)=>closed?'<details class="proposal-section"><summary>'+title+'</summary><div class="admin-grid">'+keys.map(field).join('')+'</div></details>':'<section class="proposal-section"><h3>'+title+'</h3><div class="admin-grid">'+keys.map(field).join('')+'</div></section>';
+    $('proposalFields').innerHTML=group('1. Datos principales',['nombre','organismo','link','ambito','tipo','estado','resumen','area_canalizadora','eje_principal','sector_destinatario','subsector'])+group('2. Fechas, monto y requisitos (opcional)',['apertura','cierre','monto_min','monto_max','moneda','requisitos_contrapartida','area_apoyo','ejes_secundarios'],!row)+group('3. Verificación y seguimiento',['codigo','fecha_relevamiento','origen','confianza','fuente_encontrada','fuente_primaria_verificada','motivo_relevancia','puntaje_relevancia','senales_alerta'],!row);
+    $('editProposalDialog').showModal();
   }
   function normalizePayload(raw){const out={};for(const k of [...DB_FIELDS,...Object.values(REVIEW_FIELDS)]){
     if(['posible_duplicado_de','estado_revision'].includes(k))continue;let v=raw[k];
@@ -558,7 +573,7 @@
     if(profile?.rol==='editor')out.area_canalizadora=profile.area;
     return out;
   }
-  async function saveProposal(event){event.preventDefault();const button=event.submitter;button.disabled=true;try{await ensureActive();const data=normalizePayload(Object.fromEntries(new FormData(event.target)));if(editingRow){
+  async function saveProposal(event){event.preventDefault();const button=event.submitter;button.disabled=true;try{await ensureActive();const formData=new FormData(event.target);const raw=Object.fromEntries(formData);for(const k of ARRAY_FIELDS)raw[k]=formData.getAll(k);const data=normalizePayload(raw);if(editingRow){
       if(isAdmin()&&(editingRow.estado_revision==='aprobada'||$('approveOnSave').checked)){if(!confirm('Guardar y publicar los datos de esta ficha, luego de verificar la fuente y elegibilidad?'))return;data.estado_revision='aprobada';}
       const saved=await resultOf(db.from('oportunidades').update(data).eq('id',editingRow.id).eq('version',editingRow.version).select('id'));if(!saved.length)throw new Error('La ficha cambió o no tenés permiso. Actualizá la cola.');
     }else{await resultOf(db.from('oportunidades').insert(data));}
