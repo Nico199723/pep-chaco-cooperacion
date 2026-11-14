@@ -3,13 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="light">
   <meta name="description" content="Oportunidades de Financiamiento, Capacitación y Colaboración del PEP Chaco +20 para las áreas responsables del Gobierno de la Provincia del Chaco.">
   <title>Oportunidades de Financiamiento, Capacitación y Colaboración · PEP Chaco +20</title>
   <script>
+    const AUTH_CALLBACK = (()=>{const url=new URL(location.href),params=new URLSearchParams(url.hash.slice(1));
+      if(!params.has('access_token')&&!params.has('error')&&!params.has('error_code'))return null;
+      const callback={access_token:params.get('access_token'),refresh_token:params.get('refresh_token'),type:params.get('type'),error:params.get('error_code')||params.get('error')};
+      history.replaceState(null,'',url.pathname+url.search);return callback;})();
     // CONFIGURACIÓN: URL del proyecto Supabase y clave pública anon/publishable.
     // Hasta configurarlas no se carga ninguna oportunidad.
-    // Los datos aprobados son públicos; la gestión requiere Auth, RLS y TOTP para admin.
+    // Los datos aprobados son públicos; la gestión requiere Auth y RLS por rol.
     const SUPABASE_URL = "https://aanumkadbxcchkbczlui.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_iMvvF_K29kwO3UpbSh66mg__RQx2N2q"; // Solo clave anon/publishable pública. Nunca service_role.
   </script>
@@ -76,8 +81,8 @@
 <dialog id="loginDialog" aria-labelledby="loginTitle"><div class="dialog-header"><h2 id="loginTitle">Acceso de usuarios</h2><button class="dialog-close" data-close="loginDialog" aria-label="Cerrar">×</button></div><div class="dialog-content">
  <form id="loginForm" class="admin-form"><label>Email<input type="email" name="email" autocomplete="username" required></label><label>Contraseña<input type="password" name="password" autocomplete="current-password" required></label><button class="button primary">Ingresar</button></form>
  <p class="helper">El administrador crea las cuentas. No hay registro público. La sesión se cierra después de 30 minutos de inactividad y al recargar o cerrar esta página.</p><p id="loginError" role="alert"></p>
- <section id="mfaSection" hidden><h3>Doble factor</h3><p id="mfaDescription"></p><div id="mfaEnrollment"></div><form id="mfaForm" class="admin-form"><label>Código de la aplicación autenticadora<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label><button class="button primary">Verificar código</button></form></section>
 </div></dialog>
+<dialog id="passwordDialog" aria-labelledby="passwordTitle"><div class="dialog-header"><h2 id="passwordTitle">Crear contraseña</h2><button class="dialog-close" data-close="passwordDialog" aria-label="Cerrar">×</button></div><div class="dialog-content"><p>Completá tu acceso con una contraseña propia. Después podrás ingresar con tu correo.</p><form id="passwordForm" class="admin-form"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="10" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="10" required></label><button class="button primary">Guardar contraseña</button></form><p id="passwordError" role="alert"></p></div></dialog>
 <dialog id="editProposalDialog" aria-labelledby="editProposalTitle"><div class="dialog-header"><h2 id="editProposalTitle">Propuesta</h2><button class="dialog-close" data-close="editProposalDialog" aria-label="Cerrar">×</button></div><div class="dialog-content"><form id="proposalForm"><p class="helper">Completá la ficha. Al guardar, queda pendiente de revisión y no se publica.</p><div id="proposalFields"></div><p class="helper">Marcá los destinatarios que correspondan. Fechas y montos sin información se dejan vacíos: se mostrarán como “No informado”. El resumen admite hasta tres líneas.</p><label id="approveOnSaveLabel" hidden><input id="approveOnSave" type="checkbox"> Guardar los cambios y aprobar esta propuesta</label><p id="proposalError" role="alert"></p><button id="saveProposalButton" class="button primary" type="submit">Guardar pendiente</button></form></div></dialog>
 <dialog id="importDialog" aria-labelledby="importTitle"><div class="dialog-header"><h2 id="importTitle">Revisar importación</h2><button class="dialog-close" data-close="importDialog" aria-label="Cerrar">×</button></div><div class="dialog-content"><p>La importación crea propuestas pendientes. Nunca publica ni reemplaza una oportunidad aprobada. Se procesan como máximo 25 filas, por puntaje y cercanía del cierre.</p><div id="importPreview"></div><label>Cambio sustancial respecto de rechazos anteriores (si corresponde)<textarea id="substantialChange" rows="3" placeholder="Explicá el cambio verificable. Sin justificación, los rechazos repetidos se omiten."></textarea></label><div class="admin-actions"><button class="button primary" id="confirmImport">Importar como pendientes</button><button class="button" id="exportOverflow" hidden>Exportar pendientes de siguiente corrida</button></div><pre id="importResult" aria-live="polite"></pre></div></dialog>
 
@@ -469,7 +474,7 @@
   let adminRows=[],adminTab='queue',queueStatus='pendiente',editingRow=null,importRows=[],overflowRows=[];
   let lastActivity=Date.now(),lastHeartbeat=0,heartbeatBusy=false,loggingOut=false,authEpoch=0;
   const IDLE_MS=30*60*1000;
-  function isAdmin(){return profile?.rol==='admin'&&aal==='aal2';}
+  function isAdmin(){return profile?.rol==='admin';}
   function canPropose(){return isAdmin()||profile?.rol==='editor';}
   async function resultOf(request){const r=await request;if(r.error)throw new Error(r.error.message);return r.data;}
   function errorMessage(error){return error?.message||'No se pudo completar la operación.';}
@@ -495,29 +500,36 @@
   async function ensureActive(){if(!currentUser)throw new Error('Ingresá para continuar');if(Date.now()-lastActivity>=IDLE_MS){await logout();throw new Error('Sesión cerrada por inactividad');}await resultOf(db.rpc('actividad_sesion'));lastHeartbeat=Date.now();}
   async function refreshIdentity(){
     const session=await resultOf(db.auth.getSession());currentUser=session.session?.user||null;
-    if(currentUser){profile=await resultOf(db.from('perfiles').select('*').eq('id',currentUser.id).single());const a=await resultOf(db.auth.mfa.getAuthenticatorAssuranceLevel());aal=a.currentLevel;}
+    if(currentUser){profile=await resultOf(db.from('perfiles').select('*').eq('id',currentUser.id).single());aal='aal1';}
     else {profile=null;aal='aal1';}
     configureAccount();
   }
   async function login(event){event.preventDefault();const button=event.submitter;button.disabled=true;text('loginError','');
     try{const form=new FormData(event.target);await resultOf(db.auth.signInWithPassword({email:form.get('email').trim(),password:form.get('password')}));event.target.reset();lastActivity=Date.now();await resultOf(db.rpc('actividad_sesion'));await refreshIdentity();
-      const a=await resultOf(db.auth.mfa.getAuthenticatorAssuranceLevel());
-      if(profile?.rol==='admin'||a.nextLevel==='aal2'){await prepareMFA();}else{$('loginDialog').close();if(canPropose())await showManagement();}
+      $('loginDialog').close();if(canPropose())await showManagement();
     }catch(e){text('loginError',errorMessage(e));}finally{button.disabled=false;}
   }
-  async function prepareMFA(){
-    $('loginForm').hidden=true;$('mfaSection').hidden=false;$('mfaEnrollment').replaceChildren();
-    const factors=await resultOf(db.auth.mfa.listFactors());const verified=factors.totp.find(f=>f.status==='verified');
-    if(verified){factorId=verified.id;text('mfaDescription','Ingresá el código de seis dígitos de tu aplicación autenticadora.');return;}
-    for(const f of (factors.all||[]).filter(f=>f.factor_type==='totp'&&f.status==='unverified'))await resultOf(db.auth.mfa.unenroll({factorId:f.id}));
-    const data=await resultOf(db.auth.mfa.enroll({factorType:'totp',friendlyName:'PEP Chaco +20'}));factorId=data.id;
-    text('mfaDescription','Agregá esta cuenta en tu aplicación autenticadora y verificá el primer código para habilitar la administración.');
-    const img=document.createElement('img');img.alt='QR para configurar doble factor';img.width=200;img.height=200;
-    img.src=data.totp.qr_code.startsWith('data:image/')?data.totp.qr_code:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(data.totp.qr_code);
-    const code=document.createElement('code');code.textContent=data.totp.secret;$('mfaEnrollment').append(img,document.createElement('br'),code);
+  async function acceptInvitation(){
+    if(!AUTH_CALLBACK)return;
+    const callback={...AUTH_CALLBACK};Object.keys(AUTH_CALLBACK).forEach(k=>AUTH_CALLBACK[k]=null);
+    try{
+      if(callback.error)throw new Error('El enlace de acceso venció o ya fue utilizado. Pedile al administrador una nueva invitación.');
+      if(!callback.access_token||!callback.refresh_token||!['invite','recovery'].includes(callback.type))throw new Error('Enlace de acceso incompleto o no admitido. Solicitá una nueva invitación.');
+      await resultOf(db.auth.setSession({access_token:callback.access_token,refresh_token:callback.refresh_token}));
+      lastActivity=Date.now();await refreshIdentity();
+      text('passwordTitle',callback.type==='invite'?'Crear contraseña':'Restablecer contraseña');$('passwordDialog').showModal();
+    }catch(e){text('loginError',errorMessage(e));$('loginDialog').showModal();}
+    finally{callback.access_token=null;callback.refresh_token=null;}
   }
-  async function verifyMFA(event){event.preventDefault();event.submitter.disabled=true;try{await resultOf(db.auth.mfa.challengeAndVerify({factorId,code:new FormData(event.target).get('code')}));event.target.reset();$('mfaEnrollment').replaceChildren();await refreshIdentity();await ensureActive();$('loginDialog').close();if(canPropose())await showManagement();}catch(e){text('loginError',errorMessage(e));}finally{event.submitter.disabled=false;}}
-  function clearPrivate(){authEpoch++;currentUser=null;profile=null;aal='aal1';factorId=null;adminRows=[];importRows=[];overflowRows=[];editingRow=null;$('managementBody').replaceChildren();$('proposalFields').replaceChildren();$('importPreview').replaceChildren();$('importResult').textContent='';$('mfaEnrollment').replaceChildren();$('substantialChange').value='';for(const id of ['loginDialog','editProposalDialog','importDialog'])$(id).close();configureAccount();}
+  async function savePassword(event){event.preventDefault();const button=event.submitter;button.disabled=true;text('passwordError','');
+    try{const form=new FormData(event.target),password=String(form.get('password')||'');
+      if(password.length<10)throw new Error('Usá al menos 10 caracteres.');
+      if(password!==form.get('confirmPassword'))throw new Error('Las contraseñas no coinciden.');
+      await resultOf(db.auth.updateUser({password}));event.target.reset();$('passwordDialog').close();
+      await db.auth.signOut({scope:'local'});clearPrivate();text('loginError','Contraseña guardada. Ingresá con tu correo y la nueva contraseña.');$('loginDialog').showModal();
+    }catch(e){text('passwordError',errorMessage(e));}finally{button.disabled=false;}
+  }
+  function clearPrivate(){authEpoch++;currentUser=null;profile=null;aal='aal1';factorId=null;adminRows=[];importRows=[];overflowRows=[];editingRow=null;$('managementBody').replaceChildren();$('proposalFields').replaceChildren();$('importPreview').replaceChildren();$('importResult').textContent='';$('substantialChange').value='';for(const id of ['loginDialog','editProposalDialog','importDialog','passwordDialog'])$(id).close();configureAccount();}
   async function logout(){if(loggingOut)return;loggingOut=true;try{if(db&&currentUser){await db.rpc('cerrar_sesion');await db.auth.signOut({scope:'local'});}}finally{clearPrivate();loggingOut=false;toast('Sesión cerrada');}}
   async function showManagement(){await ensureActive();if(!canPropose())throw new Error('Sin permisos de gestión');$('management').hidden=false;text('roleHelp',isAdmin()?'Revisá la fuente primaria y la elegibilidad antes de aprobar. Los cambios se registran en el historial.':'Podés proponer y editar tus pendientes dentro del área asignada. La publicación requiere aprobación del administrador.');await renderManagement();$('management').scrollIntoView({behavior:'smooth'});}
   async function renderManagement(){
@@ -611,7 +623,7 @@
     if(SUPABASE_URL&&SUPABASE_ANON_KEY&&window.supabase){db=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:false,detectSessionInUrl:false,autoRefreshToken:true}});publicDB=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:false,detectSessionInUrl:false,autoRefreshToken:false}});
       db.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT')queueMicrotask(clearPrivate);});
     }else{$('loginButton').disabled=true;$('loginButton').title='Falta configurar la conexión con Supabase';}
-    $('loginButton').addEventListener('click',()=>{$('loginForm').hidden=false;$('mfaSection').hidden=true;text('loginError','');$('loginDialog').showModal();});$('loginForm').addEventListener('submit',login);$('mfaForm').addEventListener('submit',verifyMFA);
+    $('loginButton').addEventListener('click',()=>{$('loginForm').hidden=false;text('loginError','');$('loginDialog').showModal();});$('loginForm').addEventListener('submit',login);$('passwordForm').addEventListener('submit',savePassword);
     $('logoutButton').addEventListener('click',logout);$('panelButton').addEventListener('click',()=>guarded(showManagement));$('closePanel').addEventListener('click',()=>{$('management').hidden=true;});$('newProposal').addEventListener('click',()=>guarded(()=>openProposal()));$('proposalForm').addEventListener('submit',saveProposal);
     $('weeklyImport').addEventListener('click',()=>$('csvFile').click());$('rejectionsExport').addEventListener('click',()=>guarded(exportRejections));$('confirmImport').addEventListener('click',()=>guarded(confirmImport,$('confirmImport')));$('exportOverflow').addEventListener('click',()=>download('PEP_Chaco_pendientes_siguiente_corrida.csv',csvFull(overflowRows.map(reviewObject),[...HEADERS,...Object.keys(REVIEW_FIELDS)])));
     $('management').addEventListener('change',e=>{if(e.target.id==='queueStatus'){queueStatus=e.target.value;guarded(renderManagement);}});
@@ -625,7 +637,7 @@
     ['pointerdown','keydown','scroll','touchstart'].forEach(name=>document.addEventListener(name,activity,{passive:true}));
     setInterval(()=>{if(currentUser&&Date.now()-lastActivity>=IDLE_MS)logout();},10000);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden&&currentUser&&Date.now()-lastActivity>=IDLE_MS)logout();});
-    configureAccount();await loadRemote();
+    configureAccount();if(db)await acceptInvitation();await loadRemote();
   }
 
   init();
