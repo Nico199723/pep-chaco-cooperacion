@@ -28,7 +28,7 @@ create function private.sesion_activa() returns boolean language sql stable secu
  and usuario=auth.uid() and not revocada and actividad>now()-interval '30 minutes')
 $$;
 create function private.admin() returns boolean language sql stable security definer set search_path='' as $$
- select coalesce(private.rol()='admin' and auth.jwt()->>'aal'='aal2' and private.sesion_activa(),false)
+ select coalesce(private.rol()='admin' and private.sesion_activa(),false)
 $$;
 create function private.editor() returns boolean language sql stable security definer set search_path='' as $$
  select coalesce(private.rol()='editor' and private.sesion_activa(),false)
@@ -199,7 +199,7 @@ create function public.revisar_lote(items jsonb, decision text, motivo text defa
 language plpgsql security invoker set search_path='' as $$
 declare item jsonb;n integer:=0;
 begin
- if not private.admin() then raise exception 'Administrador con doble factor y sesión activa requerido';end if;
+ if not private.admin() then raise exception 'Administrador con sesión activa requerido';end if;
  if decision not in ('aprobada','rechazada','archivada') then raise exception 'Decisión inválida';end if;
  if jsonb_array_length(items) not between 1 and 25 then raise exception 'Seleccioná de 1 a 25 filas';end if;
  for item in select value from jsonb_array_elements(items) loop
@@ -215,7 +215,7 @@ create function public.importar_propuestas(filas jsonb) returns jsonb
 language plpgsql security invoker set search_path='' as $$
 declare j jsonb;r public.oportunidades;d public.oportunidades;result jsonb:='[]';nuevo uuid;
 begin
- if not private.admin() then raise exception 'Administrador con doble factor requerido';end if;
+ if not private.admin() then raise exception 'Administrador con sesión activa requerido';end if;
  if jsonb_array_length(filas) not between 1 and 25 then raise exception 'Máximo 25 propuestas por corrida';end if;
  perform pg_advisory_xact_lock(203021);
  for j in select value from jsonb_array_elements(filas) loop
@@ -239,7 +239,7 @@ create function public.fusionar_propuesta(origen_id uuid,destino_id uuid,version
 language plpgsql security invoker set search_path='' as $$
 declare s public.oportunidades;t public.oportunidades;
 begin
- if not private.admin() then raise exception 'Administrador con doble factor requerido';end if;
+ if not private.admin() then raise exception 'Administrador con sesión activa requerido';end if;
  if origen_id=destino_id then raise exception 'Origen y destino deben ser distintos';end if;
  perform id from public.oportunidades where id in (origen_id,destino_id) order by id for update;
  select * into s from public.oportunidades where id=origen_id;
